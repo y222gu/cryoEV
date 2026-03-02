@@ -122,16 +122,16 @@ Set `pixel_size` in the config (e.g., `3.5` for 3.5 nm/px) to report measurement
 
 Set `accept_all=False` and choose a `confidence_threshold` in the config. For each object with confidence below the threshold, a matplotlib popup will appear showing:
 
-- **Left panel**: full image with all objects overlaid (green = accepted, yellow = under review).
-- **Right panel**: zoomed crop of the current object.
-- **Buttons**: Accept / Reject.
+- **Left panel**: original image (clean, no annotations).
+- **Right panel**: overlay with all detection masks — green for objects above the confidence threshold, yellow for objects below — and a red circle highlighting the object under review.
+- **Buttons**: Accept / Reject / Exit. Exit stops the entire inference process immediately.
 
 ### Python API
 
 ```python
 from inference.inference import predict_with_review
 
-masks, confidences, decisions, morphology = predict_with_review(
+masks, confidences, decisions, morphology, exited = predict_with_review(
     image_path='test_image.png',
     output_dir='results/',
     yolo_model_path='weights/best.pt',
