@@ -2,12 +2,9 @@
 
 Instance segmentation of extracellular vesicles in cryo-EM micrographs.
 
-Supports two model families:
+Uses **YOLO instance segmentation** (via `ultralytics`) for direct per-object polygon masks, followed by **ellipse fitting and morphology analysis** to quantify vesicle size and shape.
 
-- **UNet / FPN / DeepLabV3+** (via `segmentation_models_pytorch`) for pixel-level binary segmentation with connected-component instance extraction.
-- **YOLOv8-seg** (via `ultralytics`) for direct instance segmentation with polygon masks.
-
-Both pipelines share a **confidence-based interactive review** system that lets you inspect and accept/reject low-confidence detections before saving final results.
+Includes a **confidence-based interactive review** system that lets you inspect and accept/reject low-confidence detections before saving final results.
 
 ## Installation
 
@@ -22,20 +19,22 @@ cryoEV/
 ├── README.md
 ├── requirements.txt
 ├── data_utils/
-│   ├── clean_filename.py       # Remove .rf.<hash> artifacts from filenames
-│   ├── clean_label.py          # Remap / filter YOLO class IDs
-│   └── split_dataset.py        # Random train/val/test split
+│   ├── clean_filename.py        # Remove .rf.<hash> artifacts from filenames
+│   ├── clean_label.py           # Remap / filter YOLO class IDs
+│   └── split_dataset.py         # Random train/val/test split
 ├── datasets/
-│   └── cryo_instance_dataset.py  # PyTorch Dataset for YOLO-polygon labels
+│   └── cryo_instance_dataset.py # PyTorch Dataset for YOLO-polygon labels
 ├── transforms/
-│   └── cryo_transforms.py      # Albumentations pipelines (light/standard/heavy)
+│   └── cryo_transforms.py       # Albumentations pipelines (light/standard/heavy)
 ├── training/
-│   ├── train_unet.py           # UNet/FPN/DeepLabV3+ training loop
-│   └── train_yolo.py           # YOLOv8-seg training + evaluation
+│   ├── train_unet.py            # UNet/FPN/DeepLabV3+ training loop
+│   └── train_yolo.py            # YOLO training + evaluation
 ├── inference/
-│   └── inference.py            # Prediction, confidence scoring, interactive review
+│   └── inference.py             # YOLO inference, review, and morphology analysis
+├── analysis/
+│   └── morphology.py            # Ellipse fitting and shape descriptors
 └── visualization/
-    └── training_curves.py      # Loss/IoU/F1 curve plotting
+    └── training_curves.py       # Loss/IoU/F1 curve plotting
 ```
 
 ## Data Preparation
@@ -71,26 +70,6 @@ Edit the paths and config dicts inside each script before running.
 
 ## Training
 
-### UNet / FPN / DeepLabV3+
-
-```bash
-python -m training.train_unet
-```
-
-Key parameters (edit `CONFIG` dict in `training/train_unet.py`):
-
-| Parameter | Default | Description |
-|---|---|---|
-| `image_size` | 1024 | Input resolution |
-| `batch_size` | 8 | Batch size |
-| `epochs` | 300 | Max epochs |
-| `patience` | 15 | Early-stopping patience |
-| `base_lr` | 5e-4 | Initial learning rate |
-| `augmentation` | `'light'` | `'light'`, `'standard'`, or `'heavy'` |
-| `scheduler` | `'plateau'` | `'plateau'`, `'cosine'`, or `'onecycle'` |
-
-### YOLOv8-seg
-
 ```bash
 python -m training.train_yolo
 ```
@@ -100,55 +79,75 @@ See `training/train_yolo.py` for configuration options including YOLO model size
 ### Visualise training curves
 
 ```bash
-# Single experiment
-python -m visualization.training_curves results/unet_resnet34_combined
-
-# Compare multiple experiments
-python -m visualization.training_curves results/unet_resnet34_combined results/fpn_resnet34_combined
+python -m visualization.training_curves results/experiment_name
 ```
 
 ## Inference
-
-### Basic (no review)
 
 ```bash
 python -m inference.inference
 ```
 
-By default `accept_all=True`, so all detected objects are saved without interactive review.
+Edit the `CONFIG` dict in `inference/inference.py` to set your model path, test data directory, and output directory.
 
-### With interactive confidence review
+### What it produces
 
-Set `accept_all=False` and choose a `confidence_threshold` in the config:
+For each test image:
 
-```python
-from inference.inference import predict_with_review
+| Output file | Description |
+|---|---|
+| `<name>_mask.png` | Combined binary mask of accepted detections |
+| `<name>_decisions.csv` | Per-object accept/reject decisions with bounding boxes |
+| `<name>_morphology.csv` | Per-vesicle shape measurements (see below) |
+| `<name>_ellipses.png` | Image with fitted ellipses overlaid |
+| `<name>_morphology_distributions.png` | Histograms of size and shape descriptors |
 
-predict_with_review(
-    model_type='unet',                    # or 'yolo'
-    image_path='test_image.png',
-    output_dir='review_output',
-    checkpoint_path='best_model_iou.pth', # UNet checkpoint
-    confidence_threshold=0.5,
-    accept_all=False,                     # enables popup review
-)
-```
+Plus combined outputs across all images: `morphology_all.csv` and `morphology_distributions_all.png`.
 
-For each object with confidence below the threshold, a matplotlib popup will appear showing:
+### Morphology metrics
+
+Each detected vesicle is measured by fitting an ellipse and computing:
+
+| Metric | Description |
+|---|---|
+| `equivalent_diameter` | Diameter of a circle with the same area |
+| `major_axis` / `minor_axis` | Fitted ellipse axes |
+| `aspect_ratio` | major / minor (1.0 = circular) |
+| `circularity` | 4*pi*area / perimeter^2 (1.0 = perfect circle) |
+| `solidity` | area / convex hull area |
+
+Set `pixel_size` in the config (e.g., `3.5` for 3.5 nm/px) to report measurements in physical units instead of pixels.
+
+### Interactive confidence review
+
+Set `accept_all=False` and choose a `confidence_threshold` in the config. For each object with confidence below the threshold, a matplotlib popup will appear showing:
 
 - **Left panel**: full image with all objects overlaid (green = accepted, yellow = under review).
 - **Right panel**: zoomed crop of the current object.
 - **Buttons**: Accept / Reject.
 
-Decisions are saved to a CSV file (`<image_name>_decisions.csv`) with columns: `object_index`, `confidence`, `decision`, `bbox_x_min`, `bbox_y_min`, `bbox_x_max`, `bbox_y_max`.
+### Python API
+
+```python
+from inference.inference import predict_with_review
+
+masks, confidences, decisions, morphology = predict_with_review(
+    image_path='test_image.png',
+    output_dir='results/',
+    yolo_model_path='weights/best.pt',
+    pixel_size=3.5,          # nm/px, or None for pixel units
+    confidence_threshold=0.5,
+    accept_all=False,        # enables popup review
+)
+```
 
 ### Key functions
 
-| Function | Description |
-|---|---|
-| `predict_single_image()` | UNet inference on one image |
-| `batch_inference()` | UNet inference on a DataLoader |
-| `extract_instances_unet()` | Connected-component extraction with per-object confidence |
-| `extract_instances_yolo()` | YOLO mask extraction (wraps `load_predictions_from_model`) |
-| `interactive_review_objects()` | Popup-based accept/reject for low-confidence objects |
-| `predict_with_review()` | End-to-end orchestrator: predict -> review -> save |
+| Function | Module | Description |
+|---|---|---|
+| `extract_instances_yolo()` | `inference.inference` | YOLO mask extraction with per-object confidence |
+| `interactive_review_objects()` | `inference.inference` | Popup-based accept/reject for low-confidence objects |
+| `predict_with_review()` | `inference.inference` | End-to-end: predict, review, analyse, save |
+| `analyze_instances()` | `analysis.morphology` | Compute morphology descriptors for a list of masks |
+| `fit_ellipse()` | `analysis.morphology` | Fit an ellipse to a single instance mask |
+| `plot_morphology_distributions()` | `analysis.morphology` | Plot histograms of size/shape metrics |

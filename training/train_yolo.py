@@ -521,7 +521,8 @@ def load_predictions_from_model(model_path: str, img_path: str, imgsz: int,
     
     if result.masks is not None and result.boxes is not None:
         for mask, box in zip(result.masks.data, result.boxes):
-            mask_np = cv2.resize(mask.cpu().numpy(), (w, h), interpolation=cv2.INTER_LINEAR)
+            mask_2d = mask.cpu().numpy().squeeze()  # handle (1,H,W) or (H,W,1)
+            mask_np = cv2.resize(mask_2d, (w, h), interpolation=cv2.INTER_LINEAR)
             mask_bool = mask_np > 0.5
             pred_masks.append(mask_bool)
             confidences.append(float(box.conf.cpu().numpy()[0]))
