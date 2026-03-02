@@ -102,26 +102,29 @@ def interactive_review_objects(
     instance_masks: List[np.ndarray],
     confidences: List[float],
     threshold: float = 0.5,
-    accept_all: bool = False
+    skip_review: bool = False
 ) -> Tuple[List[np.ndarray], List[float], List[Dict], bool]:
     """
-    Interactively review detected objects.
+    Review detected objects by confidence threshold.
 
     Objects with confidence >= threshold are automatically accepted.
-    Objects below threshold are shown in a matplotlib popup for manual
-    accept/reject (unless accept_all is True).
+    Objects below threshold are either rejected automatically
+    (skip_review=True) or shown in a matplotlib popup for manual
+    accept/reject (skip_review=False).
 
     Args:
         image: Original grayscale image (H, W)
         instance_masks: List of boolean masks per object
         confidences: List of confidence scores per object
-        threshold: Confidence threshold for automatic acceptance
-        accept_all: If True, accept everything without popups
+        threshold: Confidence threshold for acceptance
+        skip_review: If True, reject all below-threshold objects
+            without showing popups.
 
     Returns:
         filtered_masks: Masks of accepted objects
         filtered_confs: Confidences of accepted objects
         decisions: List of dicts recording each decision
+        exited: True if the user clicked Exit during review
     """
     filtered_masks: List[np.ndarray] = []
     filtered_confs: List[float] = []
@@ -134,10 +137,12 @@ def interactive_review_objects(
         y_min, x_min = coords.min(axis=0)
         y_max, x_max = coords.max(axis=0)
 
-        if accept_all or conf >= threshold:
+        if conf >= threshold:
             decision = 'accepted'
             filtered_masks.append(mask)
             filtered_confs.append(conf)
+        elif skip_review:
+            decision = 'rejected'
         else:
             decision = _show_review_popup(
                 image, instance_masks, confidences, idx, threshold
@@ -282,7 +287,7 @@ def predict_with_review(
     device: str = 'cpu',
     # Review params
     confidence_threshold: float = 0.5,
-    accept_all: bool = True,
+    skip_review: bool = True,
     # Morphology params
     pixel_size: Optional[float] = None,
 ) -> Tuple[List[np.ndarray], List[float], List[Dict], List[Dict], bool]:
@@ -297,13 +302,14 @@ def predict_with_review(
         yolo_conf: YOLO confidence threshold
         yolo_iou: YOLO NMS IoU threshold
         device: Device string ('cpu' or 'cuda')
-        confidence_threshold: Objects below this go to interactive review
-        accept_all: If True, accept all objects without popups
+        confidence_threshold: Objects below this are rejected (skip_review=True)
+            or shown for manual review (skip_review=False)
+        skip_review: If True, auto-reject below-threshold objects without popups
         pixel_size: Physical size per pixel (e.g., nm/px) for morphology.
             If None, measurements are in pixels.
 
     Returns:
-        (accepted_masks, accepted_confidences, decisions, morph_records)
+        (accepted_masks, accepted_confidences, decisions, morph_records, exited)
     """
     image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     if image is None:
@@ -320,7 +326,7 @@ def predict_with_review(
     # --- Review ---
     filtered_masks, filtered_confs, decisions, exited = interactive_review_objects(
         image, instance_masks, confidences,
-        threshold=confidence_threshold, accept_all=accept_all
+        threshold=confidence_threshold, skip_review=skip_review
     )
 
     if exited:
@@ -414,7 +420,7 @@ if __name__ == '__main__':
         'output_dir': r'C:\Users\Yifei\Documents\cryo\revised_annotation\results_yolov8_heavy_augmentation',
         'image_size': 1024,
         'confidence_threshold': 0.5,
-        'accept_all': False,  # Set to True to skip interactive review and accept all detections
+        'skip_review': False,  # Set to False to interactively review below-threshold detections
         'pixel_size': None,  # Set to e.g. 3.5 for nm/px conversion
     }
 
@@ -443,7 +449,7 @@ if __name__ == '__main__':
             yolo_iou=CONFIG['yolo_iou'],
             device=device,
             confidence_threshold=CONFIG['confidence_threshold'],
-            accept_all=CONFIG['accept_all'],
+            skip_review=CONFIG['skip_review'],
             pixel_size=CONFIG['pixel_size'],
         )
         # Tag each record with its source image

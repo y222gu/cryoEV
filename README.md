@@ -118,12 +118,16 @@ Each detected vesicle is measured by fitting an ellipse and computing:
 
 Set `pixel_size` in the config (e.g., `3.5` for 3.5 nm/px) to report measurements in physical units instead of pixels.
 
-### Interactive confidence review
+### Confidence threshold
 
-Set `accept_all=False` and choose a `confidence_threshold` in the config. For each object with confidence below the threshold, a matplotlib popup will appear showing:
+Objects with confidence >= `confidence_threshold` are automatically accepted. Objects below are either rejected automatically (`skip_review=True`) or presented for manual review (`skip_review=False`).
+
+### Interactive review
+
+Set `skip_review=False` to manually review below-threshold detections. A matplotlib popup will appear showing:
 
 - **Left panel**: original image (clean, no annotations).
-- **Right panel**: overlay with all detection masks — green for objects above the confidence threshold, yellow for objects below — and a red circle highlighting the object under review.
+- **Right panel**: overlay with all detection masks — green for objects above the threshold, yellow for objects below — and a red circle highlighting the object under review.
 - **Buttons**: Accept / Reject / Exit. Exit stops the entire inference process immediately.
 
 ### Python API
@@ -137,7 +141,7 @@ masks, confidences, decisions, morphology, exited = predict_with_review(
     yolo_model_path='weights/best.pt',
     pixel_size=3.5,          # nm/px, or None for pixel units
     confidence_threshold=0.5,
-    accept_all=False,        # enables popup review
+    skip_review=False,       # False = popup review, True = auto-reject below threshold
 )
 ```
 
